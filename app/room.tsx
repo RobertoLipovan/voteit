@@ -11,7 +11,7 @@ export default function Room() {
                 <View style={styles.roomData}>
                     <Text style={styles.roomLabel}>ID de la sala</Text>
                     <View style={styles.idContainer}>
-                        <Text style={styles.id}>894350</Text>
+                        <Text style={styles.id}>TEST</Text>
                         <Ionicons name="share-social" size={50} color="grey" />
                     </View>
                 </View>
