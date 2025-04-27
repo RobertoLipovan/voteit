@@ -37,6 +37,12 @@
       "eas": {
         "projectId": "35116440-85a3-4ae5-91ca-562ba6340086"
       }
-    }
+    },
+    "owner": "rlipm2"
+    // "extra": {
+    //   "eas": {
+    //     "projectId": "rlipm2"
+    //   }
+    // },
   }
 }
