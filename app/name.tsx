@@ -1,8 +1,11 @@
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from '@expo/vector-icons';
 import { router } from "expo-router"; 
+import { useLocalSearchParams } from 'expo-router';
 
 export default function Name() {
+
+    const { roomName } = useLocalSearchParams();
 
     return (
         <View style={styles.container}>
@@ -13,11 +16,12 @@ export default function Name() {
 
                     <TextInput style={styles.input} placeholder="Nombre" placeholderTextColor="#5C5C5C"></TextInput>
 
-                    <Pressable style={styles.button} onPress={() => { router.navigate('/room') }}>
+                    <Pressable style={styles.button} onPress={() => { router.navigate(`/${roomName}`) }}>
                         <Ionicons name="arrow-forward" size={24} color="#5C5C5C" />
                     </Pressable>
 
                 </View>
+
             </View>
         </View>
     );

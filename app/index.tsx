@@ -1,8 +1,50 @@
 import { View, Text, TextInput, StyleSheet, Pressable } from "react-native";
 import { Ionicons } from '@expo/vector-icons';
 import { router } from "expo-router";
+import { supabase } from "../supabase";
+import { useState } from "react";
 
 export default function Index() {
+
+    const [room, setRoom] = useState('');
+
+    const handleCreateRoom = async () => {
+
+        // Create a new room
+        const { data: room, error } = await supabase
+            .from('rooms')
+            .insert({})
+            .select('id')
+            .single();
+        if (error) {
+            console.error('Error creating room:', error);
+            return;
+        }
+
+        console.log('Room created with ID:', room.id);
+
+        router.navigate(`/${room.id}`)
+        
+    };
+
+    const handleJoinRoom = async (id: number) => {
+        
+        const { data, error } = await supabase
+            .from('rooms')
+            .select('id')
+            .eq('id', id)
+            .single();
+
+        if (error) {
+            console.error('Error joining room:', error);
+            return;
+        }
+
+        console.log('Joined room with ID:', data.id);
+        router.navigate(`/${data.id}`)
+    };
+
+
 
     return (
 
@@ -11,21 +53,15 @@ export default function Index() {
 
                 <View style={styles.joinContainer}>
 
-                    <TextInput style={styles.roomInput} placeholder="ID de la sala" placeholderTextColor="#5C5C5C"></TextInput>
+                    <TextInput style={styles.roomID} placeholder="ID de la sala" placeholderTextColor="#5C5C5C" value={room} onChangeText={setRoom} keyboardType="numeric"></TextInput>
 
-                    <Pressable style={styles.joinButton} onPress={() => { router.navigate('/name') }}>
+                    <Pressable style={styles.joinButton} onPress={() => { handleJoinRoom(parseInt(room)) }}>
                         <Ionicons name="arrow-forward" size={24} color="#5C5C5C" />
                     </Pressable>
 
                 </View>
 
-                {/* <View style={styles.createContainer}>
-
-
-
-                </View> */}
-
-                <Pressable style={styles.createButton} onPress={() => { router.navigate('/name') }}>
+                <Pressable style={styles.createButton} onPress={() => { handleCreateRoom() }}>
                     <Text style={[styles.text, styles.createText]}>Crear una sala</Text>
                 </Pressable>
 
@@ -59,7 +95,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 10,
     },
-    roomInput: {
+    roomID: {
         // width: '80%',
         flex: 1,
         height: '100%',
