@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet } from "react-native";
+import { TouchableOpacity, Modal, View, Text, StyleSheet, Pressable, TextInput } from "react-native";
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase, getRoomById, createRoom, createParticipant, updateParticipant, getParticipantsByRoomId } from '../supabase';
@@ -9,109 +9,206 @@ interface Participant {
     alias: string;
     role: string;
     room_id: number;
+    vote: string | null;
 }
 
 export default function Room() {
 
-    // Obtener el parámetro dinámico de la URL con expo-router
+    // Variables necesarias
     const { room } = useLocalSearchParams();
-
-    // Estado para almacenar los participantes
+    const roomParam = Array.isArray(room) ? room[0] : room;
     const [participants, setParticipants] = useState<Participant[]>([]);
+    const [myId, setMyId] = useState(0)
+    const [alias, setAlias] = useState("")
+    const [modalVisible, setModalVisible] = useState(true);
+    const [selectedOption, setSelectedOption] = useState<number | null>(null);
+    const votingNumbers = [1, 2, 3, 4, 5, 8, 13, 20, 40];
 
+    // Setup de la sala
     useEffect(() => {
-
         async function setupRoom() {
 
-            // Comprobar si la sala existe
-            const roomData = await getRoomById(Number(room));
+            // CREADOR DE SALA AUTOMÁTICO //////////////////////////////////////////////////////
 
+            const roomData = await getRoomById(Number(roomParam));
             if (!roomData) {
-                // Si no existe, se crea en este momento
-                await createRoom();
+                await createRoom(roomParam);
+                const participant = await createParticipant(Number(roomParam), '', 'owner');
+                if (participant) { setMyId(participant.id) }
             }
 
-            // Obtener los participantes de la sala
-            const participants = await getParticipantsByRoomId(Number(room));
+            // GESTIÓN DE PARTICIPANTES ////////////////////////////////////////////////////////
 
-            // Añadir los participantes al estado
-            if (participants) {
-                setParticipants(participants);
-            }
+            // 1. Obtenemos los participantes
+            const participantsData = await getParticipantsByRoomId(Number(roomParam));
 
-            // Si no hay ninguno, se crea un participante en este momento, sin alias y con el rol 'owner'
-            if (!participants) {
+            // 2. Almacenamos los participantes para poder ir renderizándolos
+            setParticipants(participantsData || []);
 
-                const participant = await createParticipant(Number(room), '', 'owner');
-                // Con esto conseguimos no tener que esperar a que el creador de la sala nos diga su
-                // alias, el ya es el dueño de la sala, con lo cual nadie que entre a partir de este
-                // momento tendrá el rol de dueño, sino de invitado
+            // 3. Si no hay participantes, creamos uno, pero hay que ver si es dueño o invitado
+            if (participantsData?.length === 0) {
 
-                // Ahora sí, se le pregunta al usuario por un alias
-                const alias = 'Héctor'; // TODO: Crear una modal y ejecutarla aquí para pedir el alias, por ahora una constante
+                // Dueño
+                const participant = await createParticipant(Number(roomParam), '', 'owner');
+                if (participant) { setMyId(participant.id) }
 
+                // Lo agregamos al array de participantes
                 if (participant) {
-                    const updatedParticipant = await updateParticipant(participant.id, alias, 'owner');
-                    if (updatedParticipant) {
-                        setParticipants(prev => [...prev, updatedParticipant]);
-                    }
+                    setParticipants(prev => [...prev, participant]);
                 }
 
             } else {
 
-                // Si ya hay participantes, significa que el usuario es un invitado, se pregunta por un alias
-                // y hasta que no responda, no se crea el participante
-                const alias = 'Héctor'; // TODO: Crear una modal y ejecutarla aquí para pedir el alias, por ahora una constante
+                // Invitado
+                const participant = await createParticipant(Number(roomParam), '', 'guest');
+                if (participant) { setMyId(participant.id) }
 
-                // Se crea un participante en este momento, con el alias y el rol 'guest'
-                const participant = await createParticipant(Number(room), alias, 'guest');
-
-                // Se añade el nuevo participante al array de participantes
+                // Lo agregamos al array de participantes
                 if (participant) {
                     setParticipants(prev => [...prev, participant]);
                 }
 
             }
+
         }
-        setupRoom();
+        if (myId === 0) {
+            setupRoom();
+        }
     }, []);
 
+    // Petición del alias
+    const handleAliasAssign = async () => {
+        const updatedParticipant = await updateParticipant(myId, alias, 'owner');
+        if (updatedParticipant) {
+            setParticipants(prev =>
+                prev.map(p => (p.id === updatedParticipant.id ? updatedParticipant : p))
+            );
+            setModalVisible(false);
+        }
+    }
 
+    // Suscripción a cambios
+    useEffect(() => {
+        // Suscribirse a cambios en la tabla participants para la sala actual
+        const channel = supabase
+            .channel('participants-room-' + roomParam)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'participants',
+                    filter: `room_id=eq.${roomParam}`,
+                },
+                async (payload) => {
+                    // Cada vez que haya un cambio, recarga los participantes
+                    const participantsData = await getParticipantsByRoomId(Number(roomParam));
+                    setParticipants(participantsData || []);
+                }
+            )
+            .subscribe();
+
+        // Limpieza al desmontar el componente
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [roomParam]);
+
+    const handleVote = async (num: number) => {
+        setSelectedOption(selectedOption === num ? null : num);
+
+        // Actualiza el voto en la base de datos
+        if (myId) {
+            await supabase
+                .from('participants')
+                .update({ vote: num })
+                .eq('id', myId);
+
+            // No necesitas actualizar el estado local de participants aquí,
+            // porque la suscripción a cambios ya lo hace automáticamente.
+        }
+    };
+    
 
     return (
-        <View style={styles.container}>
-            <View style={styles.content}>
-                <View style={styles.roomData}>
-                    <Text style={styles.roomLabel}>ID de la sala</Text>
-                    <View style={styles.idContainer}>
-                        <Text style={styles.id}>{room}</Text>
-                        <Ionicons name="share-social" size={50} color="grey" />
+        <>
+            <View style={styles.container}>
+                <View style={styles.content}>
+                    <View style={styles.roomData}>
+                        <Text style={styles.roomLabel}>ID de la sala</Text>
+                        <View style={styles.idContainer}>
+                            <Text style={styles.id}>{room}</Text>
+                            <Ionicons name="share-social" size={50} color="grey" />
+                        </View>
                     </View>
-                </View>
-                <View style={styles.votingBoard}>
-                    <View style={styles.headerBoard}>
-                        <Text style={styles.headerBoardText}>Nombre</Text>
-                        <Text style={styles.headerBoardText}>Voto</Text>
+                    <View style={styles.votingBoard}>
+                        <View style={styles.headerBoard}>
+                            <Text style={styles.headerBoardText}>Nombre</Text>
+                            <Text style={styles.headerBoardText}>Voto</Text>
+                        </View>
+                        <View style={styles.voteList}>
+                            {participants.map(participant => (
+                                <View style={styles.vote} key={participant.id}>
+                                    <Text style={styles.voteText}>{participant.alias}</Text>
+                                    <Text style={styles.voteText}>
+                                        {participant.vote !== null && participant.vote !== undefined ? participant.vote : '—'}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
                     </View>
-                    <View style={styles.voteList}>
-
-                        {participants.map(participant => (
-                            <View style={styles.vote} key={participant.id}>
-                                <Text style={styles.voteText}>{participant.alias}</Text>
-                                <Text style={styles.voteText}>...</Text>
-                            </View>
+                    <View style={styles.votingOptions}>
+                        {votingNumbers.map(num => (
+                            <TouchableOpacity
+                                key={num}
+                                style={[
+                                    styles.votingOption,
+                                    selectedOption === num && styles.votingOptionSelected
+                                ]}
+                                onPress={() => handleVote(num)}
+                                activeOpacity={0.7}
+                            >
+                                <Text
+                                    style={[
+                                        styles.votingOptionText,
+                                        selectedOption === num && styles.votingOptionTextSelected
+                                    ]}
+                                >
+                                    {num}
+                                </Text>
+                            </TouchableOpacity>
                         ))}
-
-                        {/* Ejemplo para el mapeo */}
-                        {/* <View style={styles.vote}>
-                            <Text style={styles.voteText}>Héctor</Text>
-                            <Text style={styles.voteText}>...</Text>
-                        </View> */}
-
                     </View>
                 </View>
             </View>
-        </View>
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={modalVisible}
+                statusBarTranslucent={true}
+                // navigationBarTranslucent={true}
+                onRequestClose={() => {
+                    setModalVisible(!modalVisible);
+                }}>
+                <View style={styles.centeredView}>
+                    <View style={styles.modalView}>
+                        <Text style={styles.modalText}>¿Cómo te llamas?</Text>
+                        <TextInput
+                            style={styles.aliasInput}
+                            placeholder="Alias"
+                            placeholderTextColor={'grey'}
+                            value={alias}
+                            onChangeText={setAlias}
+                        />
+                        <Pressable
+                            style={styles.button}
+                            onPress={handleAliasAssign}>
+                            <Text style={styles.textStyle}>¡Votemos!</Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </Modal>
+        </>
     )
 }
 
@@ -173,4 +270,94 @@ const styles = StyleSheet.create({
         fontSize: 24,
         fontWeight: 'bold',
     },
-})
+    centeredView: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalView: {
+        margin: 20,
+        backgroundColor: '#2B2B2B',
+        borderRadius: 20,
+        padding: 35,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
+        borderWidth: 1,
+        borderColor: 'grey',
+        gap: 10,
+    },
+    button: {
+        borderRadius: 10,
+        padding: 10,
+        elevation: 2,
+        backgroundColor: '#212121'
+    },
+    // buttonOpen: {
+    //     backgroundColor: '#F194FF',
+    // },
+    // buttonClose: {
+    //     backgroundColor: '#2196F3',
+    // },
+    textStyle: {
+        color: 'white',
+        fontWeight: 'bold',
+        textAlign: 'center',
+    },
+    modalText: {
+        textAlign: 'center',
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold'
+    },
+    aliasInput: {
+        height: 40,
+        width: 200,
+        padding: 10,
+        borderRadius: 10,
+        backgroundColor: '#212121',
+        fontWeight: 'bold',
+        color: 'white',
+    },
+    votingOptions: {
+        width: '100%',
+        // backgroundColor: '#212121',
+        borderRadius: 20,
+        alignItems: 'center',
+        flexDirection: 'row',
+        flexWrap: 'wrap',            // <-- permite que los hijos salten a otra fila
+        justifyContent: 'center',    // <-- centra los hijos horizontalmente
+        gap: 10,
+        padding: 10,                 // opcional: espacio interno
+        // maxHeight: 200,           // opcional: altura máxima si quieres limitarlo
+    },
+    votingOption: {
+        backgroundColor: '#212121',
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        alignSelf: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    votingOptionSelected: {
+        backgroundColor: '#4caf50', // verde o el color que prefieras
+        borderColor: '#388e3c',
+    },
+    votingOptionText: {
+        color: '#464646',
+        fontSize: 24,
+        fontWeight: 'bold',
+    },
+    votingOptionTextSelected: {
+        color: 'white',
+    },
+});

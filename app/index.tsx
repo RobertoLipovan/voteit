@@ -10,6 +10,8 @@ export default function Index() {
 
     const handleCreateRoom = async () => {
 
+        console.log("creando la sala...")
+
         // Create a new room
         const { data: room, error } = await supabase
             .from('rooms')
@@ -22,7 +24,8 @@ export default function Index() {
         }
 
         console.log('Room created with ID:', room.id);
-
+        console.log("entrando en la sala...")
+        
         router.navigate(`/${room.id}`)
         
     };
@@ -100,7 +103,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: '100%',
         padding: 10,
-        borderRadius: 10,
+        borderRadius: 20,
         backgroundColor: '#474747',
         color: '#BABABA',
         fontSize: 24,
@@ -110,7 +113,7 @@ const styles = StyleSheet.create({
         width: '20%',
         height: '100%',
         padding: 10,
-        borderRadius: 10,
+        borderRadius: 20,
         backgroundColor: '#373737',
         color: '#5C5C5C',
         fontSize: 24,
@@ -124,7 +127,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#373737',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 10,
+        borderRadius: 20,
     },
     createText: {
         color: '#474747',

@@ -53,8 +53,8 @@ export async function createRoom(name?: string) {
 export async function createParticipant(roomId: number, alias: string, role: string) {
     const { data: participant, error } = await supabase
         .from('participants')
-        .insert({ room_id: roomId, alias, role })
-        .select('id, alias, role, room_id')
+        .insert({ room_id: roomId, alias, role, vote: null })
+        .select('id, alias, role, room_id, vote')
         .single();
     if (error) {
         console.error('Error creating participant:', error);
@@ -68,8 +68,9 @@ export async function updateParticipant(id: number, alias: string, role: string)
         .from('participants')
         .update({ alias, role })
         .eq('id', id)
-        .select('id, alias, role, room_id')
+        .select('id, alias, role, room_id, vote')
         .single();
+    console.log('Participant updated:', participant);
     if (error) {
         console.error('Error updating participant:', error);
         return null;
@@ -80,7 +81,7 @@ export async function updateParticipant(id: number, alias: string, role: string)
 export async function getParticipantsByRoomId(roomId: number) {
     const { data, error } = await supabase
         .from('participants')
-        .select('id, alias, role, room_id')
+        .select('id, alias, role, room_id, vote')
         .eq('room_id', roomId);
     if (error) {
         console.error('Error getting participants:', error);
