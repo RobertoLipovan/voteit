@@ -25,13 +25,13 @@ export default function Index() {
 
         console.log('Room created with ID:', room.id);
         console.log("entrando en la sala...")
-        
+
         router.navigate(`/${room.id}`)
-        
+
     };
 
     const handleJoinRoom = async (id: number) => {
-        
+
         const { data, error } = await supabase
             .from('rooms')
             .select('id')
@@ -57,6 +57,7 @@ export default function Index() {
                 <View style={styles.joinContainer}>
 
                     <TextInput style={styles.roomID} placeholder="ID de la sala" placeholderTextColor="#5C5C5C" value={room} onChangeText={setRoom} keyboardType="numeric"></TextInput>
+
 
                     <Pressable style={styles.joinButton} onPress={() => { handleJoinRoom(parseInt(room)) }}>
                         <Ionicons name="arrow-forward" size={24} color="#5C5C5C" />
@@ -88,19 +89,19 @@ const styles = StyleSheet.create({
         // flex: 1,
         width: '100%',
         maxWidth: 400,
-        alignItems: 'center',
-        justifyContent: 'center',
+        // alignItems: 'center',
+        // justifyContent: 'center',
         gap: 10,
     },
     joinContainer: {
-        width: '100%',
+        // width: '100%',
         height: 60,
         flexDirection: 'row',
         gap: 10,
     },
     roomID: {
-        // width: '80%',
-        flex: 1,
+        width: '80%',
+        // flex: 1,
         height: '100%',
         padding: 10,
         borderRadius: 20,
@@ -111,7 +112,7 @@ const styles = StyleSheet.create({
     },
     joinButton: {
         width: '20%',
-        height: '100%',
+        // height: '100%',
         padding: 10,
         borderRadius: 20,
         backgroundColor: '#373737',
