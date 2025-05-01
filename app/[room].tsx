@@ -15,15 +15,15 @@ interface Participant {
     created_at: string;
 }
 
-// Función para obtener el alias guardado
-const getSavedAlias = () => {
-    return localStorage.getItem('voteit_alias');
-};
+// // Función para obtener el alias guardado
+// const getSavedAlias = () => {
+//     return localStorage.getItem('voteit_alias');
+// };
 
-// Función para guardar el alias
-const saveAlias = (alias: string) => {
-    localStorage.setItem('voteit_alias', alias);
-};
+// // Función para guardar el alias
+// const saveAlias = (alias: string) => {
+//     localStorage.setItem('voteit_alias', alias);
+// };
 
 export default function Room() {
 
@@ -32,7 +32,7 @@ export default function Room() {
     const roomParam = Array.isArray(room) ? room[0] : room;
     const [participants, setParticipants] = useState<Participant[]>([]);
     const [myId, setMyId] = useState(0)
-    // const [alias, setAlias] = useState("")
+    const [alias, setAlias] = useState("")
     const [role, setRole] = useState("")
     const [modalVisible, setModalVisible] = useState(true);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -40,12 +40,12 @@ export default function Room() {
     const [showingVotes, setShowingVotes] = useState(false);
     const votingNumbers = [1, 2, 3, 4, 5, 8, 13, 20, 40];
 
-    // En el estado inicial
-    const [alias, setAlias] = useState(() => {
-        // Intentamos obtener el alias guardado
-        const savedAlias = getSavedAlias();
-        return savedAlias || ""; // Si no hay alias guardado, usamos una cadena vacía
-    });
+    // // En el estado inicial
+    // const [alias, setAlias] = useState(() => {
+    //     // Intentamos obtener el alias guardado
+    //     const savedAlias = getSavedAlias();
+    //     return savedAlias || ""; // Si no hay alias guardado, usamos una cadena vacía
+    // });
 
 
 
@@ -113,7 +113,7 @@ export default function Room() {
             setParticipants(prev =>
                 prev.map(p => (p.id === updatedParticipant.id ? updatedParticipant : p))
             );
-            setModalVisible(false);            saveAlias(alias);
+            setModalVisible(false);            // saveAlias(alias);
         }
     }
 
