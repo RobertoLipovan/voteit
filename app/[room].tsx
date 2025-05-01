@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
         borderColor: 'transparent',
     },
     votingOptionSelected: {
-        backgroundColor: '#4caf50', // verde o el color que prefieras
+        backgroundColor: '#4caf50',
         borderColor: '#388e3c',
     },
     votingOptionText: {
