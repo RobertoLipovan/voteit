@@ -31,7 +31,9 @@ export default function Layout() {
             <Stack>
                 <Stack.Screen name="index" options={{ headerShown: false }} />
                 <Stack.Screen name="name" options={{ headerShown: false }} />
-                <Stack.Screen name="[room]" options={{ headerShown: false }} />
+                <Stack.Screen name="[room]" options={{
+                    headerShown: false,
+                }} />
             </Stack>
             
             </ThemeProvider>

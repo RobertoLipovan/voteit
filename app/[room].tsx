@@ -1,8 +1,10 @@
-import { TouchableOpacity, Modal, View, Text, StyleSheet, Pressable, TextInput } from "react-native";
+import { Alert, TouchableOpacity, Modal, View, Text, StyleSheet, Pressable, TextInput } from "react-native";
+import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase, getRoomById, createRoom, createParticipant, updateParticipant, getParticipantsByRoomId } from '../supabase';
 import { useEffect, useState } from 'react';
+import { Hoverable } from 'react-native-web-hover';
 
 interface Participant {
     id: number;
@@ -10,7 +12,18 @@ interface Participant {
     role: string;
     room_id: number;
     vote: string | null;
+    created_at: string;
 }
+
+// Función para obtener el alias guardado
+const getSavedAlias = () => {
+    return localStorage.getItem('voteit_alias');
+};
+
+// Función para guardar el alias
+const saveAlias = (alias: string) => {
+    localStorage.setItem('voteit_alias', alias);
+};
 
 export default function Room() {
 
@@ -19,10 +32,22 @@ export default function Room() {
     const roomParam = Array.isArray(room) ? room[0] : room;
     const [participants, setParticipants] = useState<Participant[]>([]);
     const [myId, setMyId] = useState(0)
-    const [alias, setAlias] = useState("")
+    // const [alias, setAlias] = useState("")
+    const [role, setRole] = useState("")
     const [modalVisible, setModalVisible] = useState(true);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
+    const [hasVoted, setHasVoted] = useState(false);
+    const [showingVotes, setShowingVotes] = useState(false);
     const votingNumbers = [1, 2, 3, 4, 5, 8, 13, 20, 40];
+
+    // En el estado inicial
+    const [alias, setAlias] = useState(() => {
+        // Intentamos obtener el alias guardado
+        const savedAlias = getSavedAlias();
+        return savedAlias || ""; // Si no hay alias guardado, usamos una cadena vacía
+    });
+
+
 
     // Setup de la sala
     useEffect(() => {
@@ -33,8 +58,13 @@ export default function Room() {
             const roomData = await getRoomById(Number(roomParam));
             if (!roomData) {
                 await createRoom(roomParam);
+                // Establecer showing_votes a false por defecto
+                await supabase
+                    .from('rooms')
+                    .update({ showing_votes: false })
+                    .eq('id', Number(roomParam));
                 const participant = await createParticipant(Number(roomParam), '', 'owner');
-                if (participant) { setMyId(participant.id) }
+                if (participant) { setMyId(participant.id); setRole('owner') }
             }
 
             // GESTIÓN DE PARTICIPANTES ////////////////////////////////////////////////////////
@@ -50,7 +80,7 @@ export default function Room() {
 
                 // Dueño
                 const participant = await createParticipant(Number(roomParam), '', 'owner');
-                if (participant) { setMyId(participant.id) }
+                if (participant) { setMyId(participant.id); setRole('owner') }
 
                 // Lo agregamos al array de participantes
                 if (participant) {
@@ -61,7 +91,7 @@ export default function Room() {
 
                 // Invitado
                 const participant = await createParticipant(Number(roomParam), '', 'guest');
-                if (participant) { setMyId(participant.id) }
+                if (participant) { setMyId(participant.id); setRole('guest') }
 
                 // Lo agregamos al array de participantes
                 if (participant) {
@@ -78,19 +108,39 @@ export default function Room() {
 
     // Petición del alias
     const handleAliasAssign = async () => {
-        const updatedParticipant = await updateParticipant(myId, alias, 'owner');
+        const updatedParticipant = await updateParticipant(myId, alias, role);
         if (updatedParticipant) {
             setParticipants(prev =>
                 prev.map(p => (p.id === updatedParticipant.id ? updatedParticipant : p))
             );
-            setModalVisible(false);
+            setModalVisible(false);            saveAlias(alias);
         }
     }
 
     // Suscripción a cambios
     useEffect(() => {
-        // Suscribirse a cambios en la tabla participants para la sala actual
-        const channel = supabase
+        // Suscribirse a cambios en la tabla rooms para la sala actual
+        const roomChannel = supabase
+            .channel('room-changes-' + roomParam)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'rooms',
+                    filter: `id=eq.${roomParam}`,
+                },
+                async (payload) => {
+                    if (payload.eventType === 'UPDATE') {
+                        const updatedRoom = payload.new;
+                        setShowingVotes(updatedRoom.showing_votes);
+                    }
+                }
+            )
+            .subscribe();
+
+        // Suscribirse a cambios en la tabla participants
+        const participantsChannel = supabase
             .channel('participants-room-' + roomParam)
             .on(
                 'postgres_changes',
@@ -104,31 +154,66 @@ export default function Room() {
                     // Cada vez que haya un cambio, recarga los participantes
                     const participantsData = await getParticipantsByRoomId(Number(roomParam));
                     setParticipants(participantsData || []);
+
+                    // Si el voto del usuario cambia a null, reiniciamos selectedOption
+                    const currentUser = participantsData?.find(p => p.id === myId);
+                    if (currentUser?.vote === null) {
+                        setSelectedOption(null);
+                        setHasVoted(false);
+                        setShowingVotes(false);
+                    }
                 }
             )
             .subscribe();
-
-        // Limpieza al desmontar el componente
-        return () => {
-            supabase.removeChannel(channel);
-        };
     }, [roomParam]);
 
     const handleVote = async (num: number) => {
-        setSelectedOption(selectedOption === num ? null : num);
+        // Si ya ha votado y no ha seleccionado una opción, no permitir desmarcar
+        if (hasVoted && !num) {
+            return;
+        }
 
-        // Actualiza el voto en la base de datos
+        // Actualizar el estado de si ha votado
+        if (num) {
+            setHasVoted(true);
+        }
+
+        setSelectedOption(num);
+
+        // Actualización optimista: actualizamos el estado local inmediatamente
         if (myId) {
+            setParticipants(prev =>
+                prev.map(p =>
+                    p.id === myId ? { ...p, vote: num ? num.toString() : null } : p
+                )
+            );
+
+            // Luego actualizamos la base de datos
             await supabase
                 .from('participants')
-                .update({ vote: num })
+                .update({ vote: num ? num : null })
                 .eq('id', myId);
-
-            // No necesitas actualizar el estado local de participants aquí,
-            // porque la suscripción a cambios ya lo hace automáticamente.
         }
     };
-    
+
+    const handleReset = async () => {
+        setSelectedOption(null);
+
+        // Actualización optimista: reestablecemos los votos de todos los participantes
+        setParticipants(prev =>
+            prev.map(p => ({ ...p, vote: null }))
+        );
+
+        // Actualizamos la base de datos para todos los participantes de esta sala
+        await supabase
+            .from('participants')
+            .update({ vote: null })
+            .eq('room_id', Number(roomParam));
+
+        // Reiniciar el estado de si ha votado
+        setHasVoted(false);
+    };
+
 
     return (
         <>
@@ -138,7 +223,15 @@ export default function Room() {
                         <Text style={styles.roomLabel}>ID de la sala</Text>
                         <View style={styles.idContainer}>
                             <Text style={styles.id}>{room}</Text>
-                            <Ionicons name="share-social" size={50} color="grey" />
+                            <TouchableOpacity
+                                style={styles.shareButton}
+                                onPress={() => {
+                                    Clipboard.setString(`letsvote.expo.app/${room}`);
+                                    console.log("llego");
+                                    Alert.alert('Enlace copiado', 'El enlace de la sala ha sido copiado al portapapeles');
+                                }}>
+                                <Ionicons name="share-social" size={50} color="grey" />
+                            </TouchableOpacity>
                         </View>
                     </View>
                     <View style={styles.votingBoard}>
@@ -148,45 +241,104 @@ export default function Room() {
                         </View>
                         <View style={styles.voteList}>
                             {participants.map(participant => (
-                                <View style={styles.vote} key={participant.id}>
-                                    <Text style={styles.voteText}>{participant.alias}</Text>
-                                    <Text style={styles.voteText}>
-                                        {participant.vote !== null && participant.vote !== undefined ? participant.vote : '—'}
-                                    </Text>
-                                </View>
+                                <Hoverable>
+                                    {({ hovered }) => (
+                                        <View style={[styles.vote, hovered && styles.voteHovered]} key={participant.id}>
+                                            <View style={styles.identification}>
+                                                <Text style={[styles.voteText, styles.aliasText]}>{participant.alias}</Text>
+                                                <Text
+                                                    style={[
+                                                        styles.roleText,
+                                                        participant.role === 'owner' && styles.ownerRole,
+                                                        participant.role === 'guest' && styles.guestRole,
+                                                    ]}
+                                                >
+                                                    {participant.role === 'owner' ? 'PROPIETARIO' : 'INVITADO'}
+                                                </Text>
+                                                {participant.id === myId && (
+                                                    <Text
+                                                        style={[
+                                                            styles.roleText,
+                                                            styles.meRole
+                                                        ]}
+                                                    >
+                                                        YO
+                                                    </Text>
+                                                )}
+                                            </View>
+                                            {showingVotes || participant.id === myId
+                                                ? (participant.vote !== null && participant.vote !== undefined ?
+                                                    <Text style={styles.voteText}>{participant.vote}</Text> :
+                                                    <Text style={styles.voteText}>—</Text>)
+                                                : <Ionicons name="eye-off" size={24} color="#fff" />}
+                                        </View>
+                                    )}
+                                </Hoverable>
                             ))}
                         </View>
+
+                        {role === 'owner' && (
+
+                            <View style={styles.actionsBoard}>
+                                <Hoverable style={styles.hoverable}>
+                                    {({ hovered }) => (
+                                        <Pressable style={[styles.action, hovered && styles.actionHovered]} onPress={handleReset}>
+                                            <Ionicons name="reload-circle" size={26} color="white" />
+                                        </Pressable>
+                                    )}
+                                </Hoverable>
+                                <Hoverable style={styles.hoverable}>
+                                    {({ hovered }) => (
+                                        <Pressable
+                                            style={[styles.action, hovered && styles.actionHovered]}
+                                            onPress={async () => {
+                                                await supabase
+                                                    .from('rooms')
+                                                    .update({ showing_votes: !showingVotes })
+                                                    .eq('id', Number(roomParam));
+                                            }}
+                                        >
+                                            <Ionicons name={showingVotes ? "eye" : "eye-off"} size={26} color="white" />
+                                        </Pressable>
+                                    )}
+                                </Hoverable>
+                            </View>
+
+                        )}
                     </View>
                     <View style={styles.votingOptions}>
                         {votingNumbers.map(num => (
-                            <TouchableOpacity
-                                key={num}
-                                style={[
-                                    styles.votingOption,
-                                    selectedOption === num && styles.votingOptionSelected
-                                ]}
-                                onPress={() => handleVote(num)}
-                                activeOpacity={0.7}
-                            >
-                                <Text
-                                    style={[
-                                        styles.votingOptionText,
-                                        selectedOption === num && styles.votingOptionTextSelected
-                                    ]}
-                                >
-                                    {num}
-                                </Text>
-                            </TouchableOpacity>
+                            <Hoverable>
+                                {({ hovered }) => (
+                                    <TouchableOpacity
+                                        key={num}
+                                        style={[
+                                            styles.votingOption,
+                                            selectedOption === num && styles.votingOptionSelected,
+                                            hovered && (selectedOption === num ? styles.votingOptionSelectedHovered : styles.votingOptionHovered)
+                                        ]}
+                                        onPress={() => handleVote(num)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.votingOptionText,
+                                                selectedOption === num && styles.votingOptionTextSelected,
+                                            ]}
+                                        >
+                                            {num}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                            </Hoverable>
                         ))}
                     </View>
                 </View>
             </View>
             <Modal
-                animationType="slide"
+                animationType="fade"
                 transparent={true}
                 visible={modalVisible}
-                statusBarTranslucent={true}
-                // navigationBarTranslucent={true}
                 onRequestClose={() => {
                     setModalVisible(!modalVisible);
                 }}>
@@ -213,6 +365,9 @@ export default function Room() {
 }
 
 const styles = StyleSheet.create({
+    shareButton: {
+        padding: 10,
+    },
     container: {
         flex: 1,
         alignItems: 'center',
@@ -231,7 +386,7 @@ const styles = StyleSheet.create({
     roomLabel: {
         color: 'grey',
         fontSize: 24,
-        fontWeight: 'bold',
+        fontWeight: '900',
     },
     idContainer: {
         flexDirection: 'row',
@@ -244,31 +399,47 @@ const styles = StyleSheet.create({
         fontWeight: '900',
     },
     votingBoard: {
-        backgroundColor: '#464646',
         borderRadius: 20,
-        padding: 20,
-        gap: 10,
+        overflow: 'hidden',
     },
     headerBoard: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        backgroundColor: '#393939',
+        paddingHorizontal: 20,
+        paddingVertical: 15,
+    },
+    actionsBoard: {
+        flexDirection: 'row',
+        backgroundColor: '#393939',
     },
     headerBoardText: {
-        color: 'grey',
+        color: '#B6B6B6',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '900',
     },
     voteList: {
-        gap: 10,
+        backgroundColor: '#464646',
+        paddingVertical: 5,
     },
     vote: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+    },
+    voteHovered: {
+        backgroundColor: '#565656',
     },
     voteText: {
         color: '#FFFFFF',
         fontSize: 24,
-        fontWeight: 'bold',
+        fontWeight: '700',
+    },
+    aliasText: {
+        // backgroundColor: '#393939',
+        borderRadius: 7,
+        paddingHorizontal: 8,
     },
     centeredView: {
         flex: 1,
@@ -281,16 +452,6 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         padding: 35,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 5,
-        borderWidth: 1,
-        borderColor: 'grey',
         gap: 10,
     },
     button: {
@@ -299,12 +460,6 @@ const styles = StyleSheet.create({
         elevation: 2,
         backgroundColor: '#212121'
     },
-    // buttonOpen: {
-    //     backgroundColor: '#F194FF',
-    // },
-    // buttonClose: {
-    //     backgroundColor: '#2196F3',
-    // },
     textStyle: {
         color: 'white',
         fontWeight: 'bold',
@@ -327,15 +482,13 @@ const styles = StyleSheet.create({
     },
     votingOptions: {
         width: '100%',
-        // backgroundColor: '#212121',
         borderRadius: 20,
         alignItems: 'center',
         flexDirection: 'row',
-        flexWrap: 'wrap',            // <-- permite que los hijos salten a otra fila
-        justifyContent: 'center',    // <-- centra los hijos horizontalmente
+        flexWrap: 'wrap',
+        justifyContent: 'center',   
         gap: 10,
-        padding: 10,                 // opcional: espacio interno
-        // maxHeight: 200,           // opcional: altura máxima si quieres limitarlo
+        padding: 10,
     },
     votingOption: {
         backgroundColor: '#212121',
@@ -359,5 +512,58 @@ const styles = StyleSheet.create({
     },
     votingOptionTextSelected: {
         color: 'white',
+    },
+    votingOptionHovered: {
+        backgroundColor: '#2B2B2B',
+        borderColor: '#464646',
+    },
+    votingOptionSelectedHovered: {
+        backgroundColor: '#4caf50',
+        borderColor: '#388e3c',
+    },
+    hoverable: {
+        flex: 1,
+    },
+    action: {
+        backgroundColor: '#212121',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 10,
+    },
+    actionHovered: {
+        backgroundColor: '#4caf50',
+        borderColor: '#388e3c',
+    },
+    roleText: {
+        marginTop: 5,
+        borderRadius: 5,
+        paddingHorizontal: 5,
+        height: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        alignContent: 'center',
+        backgroundColor: 'grey',
+        color: 'white',
+        fontSize: 12,
+        fontWeight: '900',
+        // opacity: 0.7,
+    },
+    ownerRole: {
+        backgroundColor: '#F9B600',
+        color: '#A77A00',
+    },
+    guestRole: {
+        backgroundColor: '#0070F9',
+        color: '#004AA4',
+    },
+    meRole: {
+        backgroundColor: '#4caf50',
+        color: '#306C32',
+    },
+    identification: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
     },
 });
